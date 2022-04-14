@@ -1,0 +1,41 @@
+version: '3'
+services:
+
+  stac-browser:
+    container_name: stactools-browse
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    ports:
+      - "8010:8010"
+    command: bash -c "npm start -- --port 8010 --host 0.0.0.0 --public https://mqs.eodc.eu/ --CATALOG_URL=https://${MQS_HOST}/stac/v1 --PATH_PREFIX=/browser"
+    labels:
+      - traefik.enable=true
+      - traefik.http.services.stac-browser.loadbalancer.server.port=8010
+      - traefik.http.routers.stac-browser-http.entrypoints=http
+      - "traefik.http.routers.stac-browser-http.rule=(Host(`${MQS_HOST}`) && PathPrefix(`/browser`))"
+      - traefik.docker.network=mqs01
+      - traefik.http.routers.stac-browser-https.entrypoints=https
+      - "traefik.http.routers.stac-browser-https.rule=(Host(`${MQS_HOST}`) && PathPrefix(`/browser`))"
+      - traefik.http.routers.stac-browser-https.tls=true
+      - traefik.http.routers.stac-browser-https.tls.certresolver=le
+      - traefik.http.middlewares.https-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.https-redirect.redirectscheme.permanent=true
+      - "traefik.http.middlewares.stac-browser-stripprefix.stripprefix.prefixes=/browser"
+      - "traefik.http.middlewares.stac-browser-stripprefix.stripprefix.forceSlash=false"
+      - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolallowmethods=GET,OPTIONS,PUT,POST,DELETE,HEAD"
+      - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolalloworiginlistregex=.*"
+      - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolmaxage=31536000"
+      - "traefik.http.middlewares.stac-browser-cors-headers.headers.addvaryheader=true"
+      - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolallowcredentials=true"
+      - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolallowheaders=Origin,DNT,If-Match,If-Modified-Since,If-None-Match,If-Range,If-Unmodified-Since,Content-Type,Www-Authenticate,Authorization"
+      - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolexposeheaders=Location,Www-Authenticate,ETag,Expires,Last-Modified,Cache-Control,Content-Type"
+      - "traefik.http.routers.stac-browser-http.middlewares=https-redirect,stac-browser-cors-headers"
+      - "traefik.http.routers.stac-browser-https.middlewares=stac-browser-cors-headers"
+    networks:
+      - mqs01
+
+networks:
+  mqs01:
+    external: true
