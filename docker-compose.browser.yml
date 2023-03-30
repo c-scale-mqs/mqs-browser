@@ -1,29 +1,50 @@
 version: '3'
+
+# Define the services to run in the Docker Compose environment
 services:
 
+  # The STAC Browser service
   stac-browser:
+    # Define the name of the container
     container_name: stactools-browse
+    # Build the Docker image using the Dockerfile in the current directory
     build:
       context: .
       dockerfile: Dockerfile
+    # Specify the platform the container should run on
     platform: linux/amd64
+    # Expose port 8010 on the host
     ports:
       - "8010:8010"
-    command: bash -c "npm start -- --port 8010 --host 0.0.0.0 --public https://mqs.eodc.eu/ --CATALOG_URL=https://${MQS_HOST}/stac/v1 --PATH_PREFIX=/browser"
+    # Run the STAC Browser using the specified command
+    command: bash -c "npm start -- --port 8010 --host 0.0.0.0 --public https://${MQS_HOST}/ --CATALOG_URL=https://${MQS_HOST}/stac/v1 --PATH_PREFIX=/browser"
+    # Add labels for Traefik configuration
     labels:
+      # Enable Traefik for this service
       - traefik.enable=true
+      # Specify the port used by the load balancer
       - traefik.http.services.stac-browser.loadbalancer.server.port=8010
+      # Define the entrypoint for HTTP traffic
       - traefik.http.routers.stac-browser-http.entrypoints=http
-      - "traefik.http.routers.stac-browser-http.rule=(Host(`${MQS_HOST}`) && PathPrefix(`/browser`))"
+      # Define the rule for HTTP traffic to reach this service
+      - "traefik.http.routers.stac-browser-http.rule=((Host(`${MQS_HOST_ALT}`) && PathPrefix(`/browser`)) || (Host(`${MQS_HOST}`) && PathPrefix(`/browser`)))"
+      # Define the Docker network used by Traefik
       - traefik.docker.network=mqs01
+      # Define the entrypoint for HTTPS traffic
       - traefik.http.routers.stac-browser-https.entrypoints=https
-      - "traefik.http.routers.stac-browser-https.rule=(Host(`${MQS_HOST}`) && PathPrefix(`/browser`))"
+      # Define the rule for HTTPS traffic to reach this service
+      - "traefik.http.routers.stac-browser-https.rule=((Host(`${MQS_HOST_ALT}`) && PathPrefix(`/browser`)) || (Host(`${MQS_HOST}`) && PathPrefix(`/browser`)))"
+      # Enable TLS for HTTPS traffic
       - traefik.http.routers.stac-browser-https.tls=true
+      # Use Let's Encrypt for TLS certificates
       - traefik.http.routers.stac-browser-https.tls.certresolver=le
+      # Define middleware for redirecting HTTP traffic to HTTPS
       - traefik.http.middlewares.https-redirect.redirectscheme.scheme=https
       - traefik.http.middlewares.https-redirect.redirectscheme.permanent=true
+      # Define middleware for stripping the '/browser' prefix from requests
       - "traefik.http.middlewares.stac-browser-stripprefix.stripprefix.prefixes=/browser"
       - "traefik.http.middlewares.stac-browser-stripprefix.stripprefix.forceSlash=false"
+      # Define middleware for adding CORS headers to responses
       - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolallowmethods=GET,OPTIONS,PUT,POST,DELETE,HEAD"
       - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolalloworiginlistregex=.*"
       - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolmaxage=31536000"
@@ -31,11 +52,55 @@ services:
       - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolallowcredentials=true"
       - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolallowheaders=Origin,DNT,If-Match,If-Modified-Since,If-None-Match,If-Range,If-Unmodified-Since,Content-Type,Www-Authenticate,Authorization"
       - "traefik.http.middlewares.stac-browser-cors-headers.headers.accesscontrolexposeheaders=Location,Www-Authenticate,ETag,Expires,Last-Modified,Cache-Control,Content-Type"
+      # add middlewares to HTTP and HTTPS routers
       - "traefik.http.routers.stac-browser-http.middlewares=https-redirect,stac-browser-cors-headers"
       - "traefik.http.routers.stac-browser-https.middlewares=stac-browser-cors-headers"
     networks:
+      - mqs01 # attach the container to the 'mqs01' network
+
+  # Define the alias-router service
+  alias-router:
+    # Use the alpine image for this service
+    image: alpine
+    # Run the command to tail the /dev/null file
+    command: tail -f /dev/null
+    # Add labels for Traefik reverse proxy configuration
+    labels:
+      # Enable Traefik reverse proxy for this service
+      - traefik.enable=true
+      # Set the port of the stac-browser-alias load balancer to 80
+      - traefik.http.services.stac-browser-alias.loadbalancer.server.port=80
+      # Set the entrypoint for the stac-browser-alias-http router to http
+      - traefik.http.routers.stac-browser-alias-http.entrypoints=http
+      # Add the https-redirect middleware to redirect http traffic to https
+      - traefik.http.middlewares.https-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.https-redirect.redirectscheme.permanent=true
+      # Add the https-redirect middleware to the stac-browser-alias-http router
+      - "traefik.http.routers.stac-browser-alias-http.middlewares=https-redirect"
+      # Set the rule for the stac-browser-alias-http router to forward traffic with Host header matching ${MQS_HOST_ALT}
+      - "traefik.http.routers.stac-browser-alias-http.rule=(Host(`${MQS_HOST_ALT}`) && Path(`/`)) || (Host(`${MQS_HOST}`) && Path(`/`))"
+      # Set the rule for the stac-browser-alias router to forward traffic with Host header matching ${MQS_HOST_ALT}
+      - "traefik.http.routers.stac-browser-alias.rule=(Host(`${MQS_HOST_ALT}`) && Path(`/`)) || (Host(`${MQS_HOST}`) && Path(`/`))"
+      # Set the entrypoint for the stac-browser-alias router to https
+      - traefik.http.routers.stac-browser-alias.entrypoints=https
+      # Enable tls for the stac-browser-alias router
+      - traefik.http.routers.stac-browser-alias.tls=true
+      # Set the certresolver for the stac-browser-alias router to le
+      - traefik.http.routers.stac-browser-alias.tls.certresolver=le
+      # Add the redirect-regex middleware to the stac-browser-alias router
+      - "traefik.http.routers.stac-browser-alias.middlewares=redirect-regex"
+      # Add the redirect-regex middleware to redirect all traffic to https://mqs.eodc.eu/browser
+      - "traefik.http.middlewares.redirect-regex.redirectregex.regex=(.)*"
+      - "traefik.http.middlewares.redirect-regex.redirectregex.replacement=https://${MQS_HOST}/browser"
+      - "traefik.http.middlewares.redirect-regex.redirectregex.permanent=true"
+      # Use the mqs01 network for this service
+      - traefik.docker.network=mqs01
+    # Define the mqs01 network for this service
+    networks:
       - mqs01
 
+# Define the mqs01 network
 networks:
   mqs01:
+    # Set the network to be external
     external: true
